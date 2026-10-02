@@ -13,11 +13,12 @@ DECLARE_DYNAMIC_MULTICAST_DELEGATE(FRobotDied);
 UCLASS(Abstract, Blueprintable)
 class ROBOTACTIONPROJECT_API ARobotCharacterBase : public ACharacter
 {
-	GENERATED_BODY()
+    GENERATED_BODY()
 
 public:
-	// Sets default values for this character's properties
-	ARobotCharacterBase();
+    // Sets default values for this character's properties
+    //ARobotCharacterBase();
+    ARobotCharacterBase(const FObjectInitializer& ObjectInitializer = FObjectInitializer::Get());
 
     UFUNCTION(BlueprintPure, Category = "Robot|Stats")
     float GetHP() const { return HP; }
@@ -40,6 +41,9 @@ public:
     UFUNCTION(BlueprintPure, Category = "Robot|State")
     bool IsDead() const { return bIsDead; }
 
+    UFUNCTION(BlueprintPure, Category = "Robot|State")
+    bool IsAssaultBoosting() const { return bIsAssaultBoosting; }
+
     UFUNCTION(BlueprintCallable, Category = "Robot|Stats")
     void SetHP(float NewHP);
 
@@ -61,16 +65,27 @@ public:
     UPROPERTY(BlueprintAssignable, Category = "Robot|Events")
     FRobotDied OnDied;
 
+
+    // EN-used action by Quick/Assault Boost
+    bool CanSpendEN(float Cost) const;
+    bool TrySpendEN(float Cost);
+    bool IsENDepleted() const;
+
+    void DoQuickBoost(const FVector& WorldDirection);
+    void DoAssaultBoost(const FVector& WorldDirection);
+    void StopAssaultBoost();
+
+
 protected:
-	// Called when the game starts or when spawned
-	virtual void BeginPlay() override;
+    // Called when the game starts or when spawned
+    virtual void BeginPlay() override;
 
-public:	
-	// Called every frame
-	virtual void Tick(float DeltaTime) override;
+public:
+    // Called every frame
+    virtual void Tick(float DeltaTime) override;
 
-	// Called to bind functionality to input
-	virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
+    // Called to bind functionality to input
+    virtual void SetupPlayerInputComponent(class UInputComponent* PlayerInputComponent) override;
 
 
 private:
@@ -96,4 +111,27 @@ private:
 
     UPROPERTY(VisibleInstanceOnly, Category = "Robot|State")
     bool bIsDead = false;
+
+
+    // by EN Action
+    UPROPERTY(EditDefaultsOnly, Category = "Robot|Stats", meta = (ClampMin = "0.0"))
+    float GroundENRecoveryRate = 25.0f;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Robot|Stats", meta = (ClampMin = "0.0"))
+    float AirENRecoveryRate = 10.0f;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Robot|Stats", meta = (ClampMin = "0.0"))
+    float NormalENRecoveryDelay = 1.0f;
+
+    UPROPERTY(EditDefaultsOnly, Category = "Robot|Stats", meta = (ClampMin = "0.0"))
+    float DepletedENRecoveryDelay = 2.5f;
+
+    UPROPERTY(VisibleInstanceOnly, Category = "Robot|State")
+    float ENRecoveryDelayRemaining = 0.0f;
+
+    UPROPERTY(VisibleInstanceOnly, Category = "Robot|State")
+    bool bIsHovering = false;
+
+    UPROPERTY(VisibleInstanceOnly, Category = "Robot|State")
+    bool bIsAssaultBoosting = false;
 };

@@ -12,6 +12,7 @@
 #include "EnhancedInputComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "InputActionValue.h"
+#include "Character/RobotMovementComponent.h"
 
 
 APlayerRobot::APlayerRobot()
@@ -24,19 +25,6 @@ APlayerRobot::APlayerRobot()
 	bUseControllerRotationPitch = false;
 	bUseControllerRotationYaw = false;
 	bUseControllerRotationRoll = false;
-
-	// Configure character movement
-	GetCharacterMovement()->bOrientRotationToMovement = true;
-	GetCharacterMovement()->RotationRate = FRotator(0.0f, 500.0f, 0.0f);
-
-	// Note: For faster iteration times these variables, and many more, can be tweaked in the Character Blueprint
-	// instead of recompiling to adjust them
-	GetCharacterMovement()->JumpZVelocity = 500.f;
-	GetCharacterMovement()->AirControl = 0.35f;
-	GetCharacterMovement()->MaxWalkSpeed = 500.f;
-	GetCharacterMovement()->MinAnalogWalkSpeed = 20.f;
-	GetCharacterMovement()->BrakingDecelerationWalking = 2000.f;
-	GetCharacterMovement()->BrakingDecelerationFalling = 1500.0f;
 
 	// Create a camera boom (pulls in towards the player if there is a collision)
 	CameraBoom = CreateDefaultSubobject<USpringArmComponent>(TEXT("CameraBoom"));
@@ -65,6 +53,20 @@ void APlayerRobot::UnPossessed()
 	RemoveDebugHUD();
 
 	Super::UnPossessed();
+}
+
+void APlayerRobot::Tick(float DeltaTime)
+{
+	Super::Tick(DeltaTime);
+
+	if (IsDead() || !IsAssaultBoosting() || GetController() == nullptr) {
+		return;
+	}
+
+	if (URobotMovementComponent* MoveComp = Cast<URobotMovementComponent>(GetCharacterMovement())) {
+		// Keep the desired flight direction aligned with the current look rotation.
+		MoveComp->SetAssaultBoostDirection(GetAssaultBoostWorldDirection());
+	}
 }
 
 void APlayerRobot::BeginPlay()
@@ -98,6 +100,8 @@ void APlayerRobot::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 	//Bind Move
 	if (MoveAction != nullptr) {
 		EnhancedInput->BindAction(MoveAction, ETriggerEvent::Triggered, this, &APlayerRobot::Move);
+		EnhancedInput->BindAction(MoveAction, ETriggerEvent::Completed, this, &APlayerRobot::MoveEnded);
+		EnhancedInput->BindAction(MoveAction, ETriggerEvent::Canceled, this, &APlayerRobot::MoveEnded);
 	}
 	else {
 		UE_LOG(LogRobotActionProject, Warning, TEXT("MoveAction is not assigned(MoveAction == nullptr)"));
@@ -150,37 +154,40 @@ void APlayerRobot::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 // Unreal Engine: Left-handed + Z-up -> Forward: +x, Right: +y, Up: +z
 void APlayerRobot::Move(const FInputActionValue& Value)
 {
-	// route the input
 	if (IsDead() || GetController() == nullptr) {
 		return;
 	}
 
-	// input is a Vector2D
 	FVector2D MovementVector = Value.Get<FVector2D>(); //(Right, Forward)
+	CurrentMoveInput = MovementVector;
 
-	// find out which way is forward
+
+	const URobotMovementComponent* MoveComp = Cast<URobotMovementComponent>(GetCharacterMovement());
+
+	if (IsAssaultBoosting() || (MoveComp != nullptr && MoveComp->IsQuickBoost())) return;
+
+
 	const FRotator Rotation = GetController()->GetControlRotation();
 	const FRotator YawRotation(0, Rotation.Yaw, 0);
 
-	// get forward vector
 	const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
-
-	// get right vector 
 	const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
 
-	// AddMovement(WorldDirection, Value)
 	AddMovementInput(ForwardDirection, MovementVector.Y); 
 	AddMovementInput(RightDirection, MovementVector.X);
+}
+
+void APlayerRobot::MoveEnded()
+{
+	CurrentMoveInput = FVector2D::ZeroVector;
 }
 
 void APlayerRobot::Look(const FInputActionValue& Value)
 {
 	if (GetController() != nullptr)
 	{
-		// input is a Vector2D
 		FVector2D LookAxisVector = Value.Get<FVector2D>();
 
-		// add yaw and pitch input to controller
 		AddControllerYawInput(LookAxisVector.X);   //Yaw
 		AddControllerPitchInput(LookAxisVector.Y); //Pitch
 	}
@@ -188,7 +195,7 @@ void APlayerRobot::Look(const FInputActionValue& Value)
 
 void APlayerRobot::JumpStarted()
 {
-	if (IsDead() == false) {
+	if (!IsDead() && !IsAssaultBoosting()) {
 		Jump();
 	}
 }
@@ -204,7 +211,7 @@ void APlayerRobot::QuickBoostRequested()
 		return;
 	}
 
-	UE_LOG(LogRobotActionProject, Log, TEXT("<QuickBoostAction!!!>"));
+	DoQuickBoost(GetQuickBoostWorldDirection());
 }
 
 void APlayerRobot::AssaultBoostRequested()
@@ -213,7 +220,12 @@ void APlayerRobot::AssaultBoostRequested()
 		return;
 	}
 
-	UE_LOG(LogRobotActionProject, Log, TEXT("<AssaultBoostAction!!!>"));
+	if (!IsAssaultBoosting()) {
+		DoAssaultBoost(GetAssaultBoostWorldDirection());
+	}
+	else {
+		StopAssaultBoost();
+	}
 }
 
 void APlayerRobot::TryCreateDebugHUD()
@@ -257,4 +269,36 @@ void APlayerRobot::RemoveDebugHUD()
 		DebugWidget->RemoveFromParent();
 		DebugWidget = nullptr;
 	}
+}
+
+FVector APlayerRobot::GetQuickBoostWorldDirection() const
+{
+	if (GetController() == nullptr) {
+		return GetActorForwardVector().GetSafeNormal2D();
+	}
+
+	const FRotator Rotation = GetController()->GetControlRotation();
+	const FRotator YawRotation(0, Rotation.Yaw, 0);
+
+	const FVector ForwardDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::X);
+	const FVector RightDirection = FRotationMatrix(YawRotation).GetUnitAxis(EAxis::Y);
+
+
+	FVector Direction = ForwardDirection * CurrentMoveInput.Y + RightDirection * CurrentMoveInput.X;
+	Direction.Z = 0.0f;
+
+	if (Direction.IsNearlyZero()) {
+		Direction = ForwardDirection;
+	}
+
+	return Direction.GetSafeNormal();
+}
+
+FVector APlayerRobot::GetAssaultBoostWorldDirection() const
+{
+	if (GetController() == nullptr) {
+		return GetActorForwardVector().GetSafeNormal();
+	}
+
+	return GetController()->GetControlRotation().Vector().GetSafeNormal();
 }

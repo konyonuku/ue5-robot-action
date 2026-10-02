@@ -26,6 +26,7 @@ public:
     APlayerRobot();
     virtual void Restart() override;
     virtual void UnPossessed() override;
+    virtual void Tick(float DeltaTime) override;
 
 protected:
     virtual void BeginPlay() override;
@@ -54,6 +55,7 @@ protected:
 
 private:
     void Move(const FInputActionValue& Value);
+    void MoveEnded();
     void Look(const FInputActionValue& Value);
     void JumpStarted();
     void JumpEnded();
@@ -61,8 +63,11 @@ private:
     void AssaultBoostRequested();
     void TryCreateDebugHUD();
     void RemoveDebugHUD();
+    FVector GetQuickBoostWorldDirection() const;
+    FVector GetAssaultBoostWorldDirection() const;
 
     UPROPERTY(Transient)
     TObjectPtr<URobotDebugWidget> DebugWidget;
     bool bStatsReady = false;
+    FVector2D CurrentMoveInput = FVector2D::ZeroVector;
 };
