@@ -36,7 +36,7 @@ void URobotDebugWidget::NativeDestruct()
 
 void URobotDebugWidget::UnbindRobot(ARobotCharacterBase* Robot)
 {
-	if (!Robot) return;
+	if (!IsValid(Robot)) return;
 
 	Robot->OnHPChanged.RemoveDynamic(this, &URobotDebugWidget::HandleHPChanged);
 	Robot->OnENChanged.RemoveDynamic(this, &URobotDebugWidget::HandleENChanged);
@@ -48,7 +48,7 @@ void URobotDebugWidget::UnbindRobot(ARobotCharacterBase* Robot)
 void URobotDebugWidget::RefreshDisplay()
 {
 	const ARobotCharacterBase* Robot = ObservedRobot.Get();
-	if (!Robot)
+	if (Robot == nullptr)
 	{
 		ShowNoTarget();
 		return;
@@ -62,28 +62,28 @@ void URobotDebugWidget::RefreshDisplay()
 
 void URobotDebugWidget::RefreshState()
 {
-	if (StateText)
+	if (IsValid(StateText))
 	{
 		const ARobotCharacterBase* Robot = ObservedRobot.Get();
-		StateText->SetText(FText::FromString(Robot ? (Robot->IsDead() ? TEXT("Dead") : TEXT("Alive")) : TEXT("No Target")));
+		StateText->SetText(FText::FromString(Robot != nullptr ? (Robot->IsDead() ? TEXT("Dead") : TEXT("Alive")) : TEXT("No Target")));
 	}
 }
 
 void URobotDebugWidget::ShowNoTarget()
 {
-	if (HPText)
+	if (IsValid(HPText))
 	{
 		HPText->SetText(FText::FromString(TEXT("HP --")));
 	}
-	if (ENText)
+	if (IsValid(ENText))
 	{
 		ENText->SetText(FText::FromString(TEXT("EN --")));
 	}
-	if (ACSText)
+	if (IsValid(ACSText))
 	{
 		ACSText->SetText(FText::FromString(TEXT("ACS --")));
 	}
-	if (StateText)
+	if (IsValid(StateText))
 	{
 		StateText->SetText(FText::FromString(TEXT("No Target")));
 	}
@@ -91,7 +91,7 @@ void URobotDebugWidget::ShowNoTarget()
 
 void URobotDebugWidget::SetStatText(UTextBlock* TextBlock, const TCHAR* Label, float CurrentValue, float MaxValue)
 {
-	if (TextBlock)
+	if (IsValid(TextBlock))
 	{
 		// Preserve fractional values while keeping whole values compact.
 		TextBlock->SetText(FText::FromString(FString::Printf(TEXT("%s %s / %s"), Label,

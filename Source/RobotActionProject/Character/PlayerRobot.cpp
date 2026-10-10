@@ -12,7 +12,11 @@
 #include "EnhancedInputComponent.h"
 #include "GameFramework/CharacterMovementComponent.h"
 #include "InputActionValue.h"
+#include "InputAction.h"
 #include "Character/RobotMovementComponent.h"
+#include "Character/LockOnComponent.h"
+
+#include "Combat/ProjectileSubsystem.h"
 
 
 APlayerRobot::APlayerRobot()
@@ -38,6 +42,9 @@ APlayerRobot::APlayerRobot()
 	FollowCamera->bUsePawnControlRotation = false;
 	// end template
 
+
+	LockOnComponent = CreateDefaultSubobject<ULockOnComponent>(TEXT("LockOnComponent"));
+
 }
 
 
@@ -59,14 +66,33 @@ void APlayerRobot::Tick(float DeltaTime)
 {
 	Super::Tick(DeltaTime);
 
-	if (IsDead() || !IsAssaultBoosting() || GetController() == nullptr) {
-		return;
+	if (IsValid(GEngine))
+	{
+		ARobotCharacterBase* Target = IsValid(LockOnComponent) ? LockOnComponent->GetCurrentTarget() : nullptr;
+
+		FString DistanceMessage = TEXT("Target Distance: --");
+
+		if (Target != nullptr) {
+			const double DistanceCm = FVector::Dist(GetActorLocation(), Target->GetActorLocation());
+
+			DistanceMessage = FString::Printf(TEXT("Target Distance: %.1f m"), DistanceCm / 100.0);
+		}
+
+		GEngine->AddOnScreenDebugMessage(1001, 0.1f, FColor::Yellow, DistanceMessage);
 	}
 
-	if (URobotMovementComponent* MoveComp = Cast<URobotMovementComponent>(GetCharacterMovement())) {
-		// Keep the desired flight direction aligned with the current look rotation.
-		MoveComp->SetAssaultBoostDirection(GetAssaultBoostWorldDirection());
+
+	if (IsDead() || !IsValid(GetController())) return;
+
+	UpdateLockOnCamera(DeltaTime);
+
+	if (IsAssaultBoosting()) {
+		URobotMovementComponent* MoveComp = Cast<URobotMovementComponent>(GetCharacterMovement());
+		if (IsValid(MoveComp)) {
+			MoveComp->SetAssaultBoostDirection(GetAssaultBoostWorldDirection());
+		}
 	}
+
 }
 
 void APlayerRobot::BeginPlay()
@@ -92,61 +118,101 @@ void APlayerRobot::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 	
 	//Cast EnhancedInput(UInputComponent->UEnhancedInputComponent)
 	UEnhancedInputComponent* EnhancedInput = Cast<UEnhancedInputComponent>(PlayerInputComponent);
-	if (EnhancedInput == nullptr) {
-		UE_LOG(LogRobotActionProject, Error, TEXT("PlayerRobot needs an Enhanced Input(EnhancedInputComponent* == nullptr)"));
+	if (!IsValid(EnhancedInput)) {
+		UE_LOG(LogRobotActionProject, Error, TEXT("PlayerRobot needs a valid EnhancedInputComponent."));
 		return;
 	}
 
 	//Bind Move
-	if (MoveAction != nullptr) {
+	if (IsValid(MoveAction)) {
 		EnhancedInput->BindAction(MoveAction, ETriggerEvent::Triggered, this, &APlayerRobot::Move);
 		EnhancedInput->BindAction(MoveAction, ETriggerEvent::Completed, this, &APlayerRobot::MoveEnded);
 		EnhancedInput->BindAction(MoveAction, ETriggerEvent::Canceled, this, &APlayerRobot::MoveEnded);
 	}
 	else {
-		UE_LOG(LogRobotActionProject, Warning, TEXT("MoveAction is not assigned(MoveAction == nullptr)"));
+		UE_LOG(LogRobotActionProject, Warning, TEXT("MoveAction is not assigned or is invalid."));
 	}
 
 	//Bind Look
-	if (LookAction != nullptr) {
+	if (IsValid(LookAction)) {
 		EnhancedInput->BindAction(LookAction, ETriggerEvent::Triggered, this, &APlayerRobot::Look);
 	}
 	else {
-		UE_LOG(LogRobotActionProject, Warning, TEXT("LookAction is not assigned(LookAction == nullptr)"));
+		UE_LOG(LogRobotActionProject, Warning, TEXT("LookAction is not assigned or is invalid."));
 	}
 
 	//Bind MouseLook
-	if (MouseLookAction != nullptr) {
+	if (IsValid(MouseLookAction)) {
 		EnhancedInput->BindAction(MouseLookAction, ETriggerEvent::Triggered, this, &APlayerRobot::Look);
 	}
 	else {
-		UE_LOG(LogRobotActionProject, Warning, TEXT("MouseLookAction is not assigned(MouseLookAction == nullptr)"));
+		UE_LOG(LogRobotActionProject, Warning, TEXT("MouseLookAction is not assigned or is invalid."));
 	}
 	
 	//Bind Jump
-	if (JumpAction != nullptr) {
+	if (IsValid(JumpAction)) {
 		EnhancedInput->BindAction(JumpAction, ETriggerEvent::Started, this, &APlayerRobot::JumpStarted);
 		EnhancedInput->BindAction(JumpAction, ETriggerEvent::Completed, this, &APlayerRobot::JumpEnded);
 		EnhancedInput->BindAction(JumpAction, ETriggerEvent::Canceled, this, &APlayerRobot::JumpEnded);
 	}
 	else {
-		UE_LOG(LogRobotActionProject, Warning, TEXT("JumpAction is not assigned(JumpAction == nullptr)"));
+		UE_LOG(LogRobotActionProject, Warning, TEXT("JumpAction is not assigned or is invalid."));
 	}
 
 	//Bind QuickBoost
-	if (QuickBoostAction != nullptr) {
+	if (IsValid(QuickBoostAction)) {
 		EnhancedInput->BindAction(QuickBoostAction, ETriggerEvent::Started, this, &APlayerRobot::QuickBoostRequested);
 	}
 	else {
-		UE_LOG(LogRobotActionProject, Warning, TEXT("QuickBoostAction is not assigned(QuickBoostAction == nullptr)"));
+		UE_LOG(LogRobotActionProject, Warning, TEXT("QuickBoostAction is not assigned or is invalid."));
 	}
 
 	//Bind AssaultBoost
-	if (AssaultBoostAction != nullptr) {
+	if (IsValid(AssaultBoostAction)) {
 		EnhancedInput->BindAction(AssaultBoostAction, ETriggerEvent::Started, this, &APlayerRobot::AssaultBoostRequested);
 	}
 	else {
-		UE_LOG(LogRobotActionProject, Warning, TEXT("AssaultBoostAction is not assigned(AssaultBoostAction == nullptr)"));
+		UE_LOG(LogRobotActionProject, Warning, TEXT("AssaultBoostAction is not assigned or is invalid."));
+	}
+	
+	//Bind LockOn
+	if (IsValid(LockOnAction)) {
+		EnhancedInput->BindAction(LockOnAction, ETriggerEvent::Started, this, &APlayerRobot::LockOnRequested);
+	}
+	else {
+		UE_LOG(LogRobotActionProject, Warning, TEXT("LockOnAction is not assigned or is invalid."));
+	}
+
+	//Bind LockOn Switch To Right
+	if (IsValid(SwitchTargetRightAction)) {
+		EnhancedInput->BindAction(SwitchTargetRightAction, ETriggerEvent::Started, this, &APlayerRobot::SwitchTargetRightRequested);
+	}
+	else {
+		UE_LOG(LogRobotActionProject, Warning, TEXT("SwitchTargetRightAction is not assigned or is invalid."));
+	}
+
+	//Bind LockOn Switch To Left
+	if (IsValid(SwitchTargetLeftAction)) {
+		EnhancedInput->BindAction(SwitchTargetLeftAction, ETriggerEvent::Started, this, &APlayerRobot::SwitchTargetLeftRequested);
+	}
+	else {
+		UE_LOG(LogRobotActionProject, Warning, TEXT("SwitchTargetLeftAction is not assigned or is invalid."));
+	}
+
+	//Bind LH Fire
+	if (IsValid(LeftHandWeaponFireAction)) {
+		EnhancedInput->BindAction(LeftHandWeaponFireAction, ETriggerEvent::Started, this, &APlayerRobot::LeftHandWeaponFireRequested);
+	}
+	else {
+		UE_LOG(LogRobotActionProject, Warning, TEXT("LeftHandWeaponFireAction is not assigned or is invalid."));
+	}
+
+	//Bind RH Fire
+	if (IsValid(RightHandWeaponFireAction)) {
+		EnhancedInput->BindAction(RightHandWeaponFireAction, ETriggerEvent::Started, this, &APlayerRobot::RightHandWeaponFireRequested);
+	}
+	else {
+		UE_LOG(LogRobotActionProject, Warning, TEXT("RightHandWeaponFireAction is not assigned or is invalid."));
 	}
 	
 }
@@ -154,9 +220,7 @@ void APlayerRobot::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 // Unreal Engine: Left-handed + Z-up -> Forward: +x, Right: +y, Up: +z
 void APlayerRobot::Move(const FInputActionValue& Value)
 {
-	if (IsDead() || GetController() == nullptr) {
-		return;
-	}
+	if (IsDead() || !IsValid(GetController())) return;
 
 	FVector2D MovementVector = Value.Get<FVector2D>(); //(Right, Forward)
 	CurrentMoveInput = MovementVector;
@@ -164,7 +228,7 @@ void APlayerRobot::Move(const FInputActionValue& Value)
 
 	const URobotMovementComponent* MoveComp = Cast<URobotMovementComponent>(GetCharacterMovement());
 
-	if (IsAssaultBoosting() || (MoveComp != nullptr && MoveComp->IsQuickBoost())) return;
+	if (IsAssaultBoosting() || (IsValid(MoveComp) && MoveComp->IsQuickBoost())) return;
 
 
 	const FRotator Rotation = GetController()->GetControlRotation();
@@ -184,13 +248,15 @@ void APlayerRobot::MoveEnded()
 
 void APlayerRobot::Look(const FInputActionValue& Value)
 {
-	if (GetController() != nullptr)
-	{
-		FVector2D LookAxisVector = Value.Get<FVector2D>();
+	if (IsDead() || !IsValid(GetController())) return;
+	if (IsValid(LockOnComponent) && LockOnComponent->IsLockedOn()) return;
+	
 
-		AddControllerYawInput(LookAxisVector.X);   //Yaw
-		AddControllerPitchInput(LookAxisVector.Y); //Pitch
-	}
+	const FVector2D LookAxisVector = Value.Get<FVector2D>();
+
+	AddControllerYawInput(LookAxisVector.X);   //Yaw
+	AddControllerPitchInput(LookAxisVector.Y); //Pitch
+
 }
 
 void APlayerRobot::JumpStarted()
@@ -198,6 +264,7 @@ void APlayerRobot::JumpStarted()
 	if (!IsDead() && !IsAssaultBoosting()) {
 		Jump();
 	}
+
 }
 
 void APlayerRobot::JumpEnded()
@@ -207,18 +274,15 @@ void APlayerRobot::JumpEnded()
 
 void APlayerRobot::QuickBoostRequested()
 {
-	if (IsDead()) {
-		return;
-	}
+	if (IsDead()) return;
 
 	DoQuickBoost(GetQuickBoostWorldDirection());
 }
 
 void APlayerRobot::AssaultBoostRequested()
 {
-	if (IsDead()) {
-		return;
-	}
+	if (IsDead()) return;
+
 
 	if (!IsAssaultBoosting()) {
 		DoAssaultBoost(GetAssaultBoostWorldDirection());
@@ -230,24 +294,22 @@ void APlayerRobot::AssaultBoostRequested()
 
 void APlayerRobot::TryCreateDebugHUD()
 {
-	if (DebugWidget != nullptr || bStatsReady == false) {
-		return;
-	}
+	if (IsValid(DebugWidget) || bStatsReady == false) return;
+
 
 	APlayerController* PlayerController = Cast<APlayerController>(GetController());
 
-	if (PlayerController == nullptr || PlayerController->IsLocalPlayerController() == false) {
-		return;
-	}
+	if (!IsValid(PlayerController) || PlayerController->IsLocalPlayerController() == false) return;
+	
 
-	if (DebugWidgetClassToCreate == nullptr) {
+	if (!IsValid(DebugWidgetClassToCreate.Get())) {
 		UE_LOG(LogRobotActionProject, Warning, TEXT("DebugWidgetClassToCreate is not assigned."));
 		return;
 	}
 
 	DebugWidget = CreateWidget<URobotDebugWidget>(PlayerController, DebugWidgetClassToCreate);
 
-	if (DebugWidget == nullptr) {
+	if (!IsValid(DebugWidget)) {
 		UE_LOG(LogRobotActionProject, Error, TEXT("Failed to create the debug widget."));
 		return;
 	}
@@ -264,16 +326,92 @@ void APlayerRobot::TryCreateDebugHUD()
 
 void APlayerRobot::RemoveDebugHUD()
 {
-	if (DebugWidget) {
+	if (IsValid(DebugWidget)) {
 		DebugWidget->SetObservedRobot(nullptr);
 		DebugWidget->RemoveFromParent();
 		DebugWidget = nullptr;
 	}
 }
 
+void APlayerRobot::LockOnRequested()
+{
+	if (!IsValid(LockOnComponent)) return;
+	if (IsDead()) return;
+
+	LockOnComponent->ToggleLockOn();
+
+}
+
+void APlayerRobot::SwitchTargetLeftRequested()
+{
+	if (!IsValid(LockOnComponent)) return;
+	if (IsDead()) return;
+
+	LockOnComponent->TrySwitchTarget(ESwitchDirection::Left);
+}
+
+void APlayerRobot::SwitchTargetRightRequested()
+{
+	if (!IsValid(LockOnComponent)) return;
+	if (IsDead()) return;
+
+	LockOnComponent->TrySwitchTarget(ESwitchDirection::Right);
+}
+
+void APlayerRobot::UpdateLockOnCamera(float DeltaTime)
+{
+	APlayerController* PlayerController = Cast<APlayerController>(GetController());
+	if (!IsValid(PlayerController) || !IsValid(LockOnComponent) || !IsValid(FollowCamera)) return;
+
+	ARobotCharacterBase* Target = LockOnComponent->GetCurrentTarget();
+	if (Target == nullptr) return;
+
+	const FVector ToTarget = Target->GetActorLocation() - FollowCamera->GetComponentLocation();
+	if (ToTarget.IsNearlyZero()) return;
+
+
+	const FRotator TargetRotation = ToTarget.Rotation();
+	const FRotator CurrentRotation = PlayerController->GetControlRotation();
+
+	const FRotator NextRotation = FMath::RInterpTo(CurrentRotation, TargetRotation, DeltaTime, LockOnCameraTracingSpeed);
+
+	PlayerController->SetControlRotation(NextRotation);
+
+}
+
+void APlayerRobot::LeftHandWeaponFireRequested()
+{
+	UE_LOG(LogRobotActionProject, Display, TEXT("LH Fire!"));
+
+	if (IsDead() || !IsValid(FollowCamera)) return;
+
+	UWorld* World = GetWorld();
+	if (!IsValid(World)) return;
+
+	UProjectileSubsystem* Projectiles = World->GetSubsystem<UProjectileSubsystem>();
+	if (!IsValid(Projectiles)) return;
+
+	FProjectileSpawnParams Params;
+	Params.StartLocation = GetActorLocation() + FVector(0.0, 0.0, 50.0);
+	Params.Direction = FollowCamera->GetForwardVector();
+	Params.Owner = this;
+
+	if (!Projectiles->TrySpawnProjectile(Params))
+	{
+		UE_LOG(LogRobotActionProject, Warning, TEXT("Projectile spawn failed."));
+	}
+
+}
+
+void APlayerRobot::RightHandWeaponFireRequested()
+{
+	UE_LOG(LogRobotActionProject, Display, TEXT("RH Fire!"));
+
+}
+
 FVector APlayerRobot::GetQuickBoostWorldDirection() const
 {
-	if (GetController() == nullptr) {
+	if (!IsValid(GetController())) {
 		return GetActorForwardVector().GetSafeNormal2D();
 	}
 
@@ -296,7 +434,7 @@ FVector APlayerRobot::GetQuickBoostWorldDirection() const
 
 FVector APlayerRobot::GetAssaultBoostWorldDirection() const
 {
-	if (GetController() == nullptr) {
+	if (!IsValid(GetController())) {
 		return GetActorForwardVector().GetSafeNormal();
 	}
 

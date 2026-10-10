@@ -62,7 +62,7 @@ bool URobotMovementComponent::IsQuickBoost() const
 bool URobotMovementComponent::IsAssaultBoostMovementActive() const
 {
 	const ARobotCharacterBase* Robot = Cast<ARobotCharacterBase>(CharacterOwner);
-	return Robot != nullptr && !Robot->IsDead() && Robot->IsAssaultBoosting() && MovementMode == MOVE_Flying;
+	return IsValid(Robot) && !Robot->IsDead() && Robot->IsAssaultBoosting() && MovementMode == MOVE_Flying;
 }
 
 bool URobotMovementComponent::FindAssaultBoostFloor(FFindFloorResult& Floor) const
@@ -93,7 +93,7 @@ void URobotMovementComponent::StopAssaultBoostMovement()
 	if (!HasValidData()) return;
 
 	const ARobotCharacterBase* Robot = Cast<ARobotCharacterBase>(CharacterOwner);
-	if (Robot != nullptr && Robot->IsDead()) {
+	if (IsValid(Robot) && Robot->IsDead()) {
 		StopMovementImmediately();
 		DisableMovement();
 		return;
@@ -190,7 +190,8 @@ void URobotMovementComponent::HandleImpact(const FHitResult& Hit, float TimeSlic
 	if (!IsAssaultBoostMovementActive() || !Hit.IsValidBlockingHit() || IsWalkable(Hit)) return;
 
 	if (FVector::DotProduct(MoveDelta.GetSafeNormal(), Hit.ImpactNormal) < -0.1) {
-		if (ARobotCharacterBase* Robot = Cast<ARobotCharacterBase>(CharacterOwner)) {
+		ARobotCharacterBase* Robot = Cast<ARobotCharacterBase>(CharacterOwner);
+		if (IsValid(Robot)) {
 			Robot->StopAssaultBoost();
 		}
 	}

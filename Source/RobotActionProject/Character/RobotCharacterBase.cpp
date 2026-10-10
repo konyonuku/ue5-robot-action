@@ -5,6 +5,8 @@
 
 #include "RobotActionProject.h" //LogRobotActionProject
 #include "Character/RobotMovementComponent.h"
+#include "Character/LockOnComponent.h"
+#include "Components/SceneComponent.h"
 
 // Sets default values
 //ARobotCharacterBase::ARobotCharacterBase()
@@ -66,12 +68,19 @@ void ARobotCharacterBase::HandleDeath()
 	bIsHovering = false;
 	ENRecoveryDelayRemaining = 0.0f;
 
-	if(URobotMovementComponent* MoveComp = Cast<URobotMovementComponent>(GetCharacterMovement())) {
+	URobotMovementComponent* MoveComp = Cast<URobotMovementComponent>(GetCharacterMovement());
+	if (IsValid(MoveComp)) {
 		MoveComp->StopMovementImmediately();
 		MoveComp->DisableMovement();
 
 		MoveComp->StopQuickBoost();
 	}
+
+	ULockOnComponent* LockOnComp = FindComponentByClass<ULockOnComponent>();
+	if (IsValid(LockOnComp)) {
+		LockOnComp->ClearLockOn();
+	}
+
 	OnDied.Broadcast();
 }
 
@@ -100,9 +109,9 @@ bool ARobotCharacterBase::IsENDepleted() const
 void ARobotCharacterBase::DoAssaultBoost(const FVector& WorldDirection)
 {
 	URobotMovementComponent* MoveComp = Cast<URobotMovementComponent>(GetCharacterMovement());
-	if (IsDead() || IsENDepleted() || bIsAssaultBoosting || MoveComp == nullptr) return;
+	if (IsDead() || IsENDepleted() || bIsAssaultBoosting || !IsValid(MoveComp)) return;
 	if (MoveComp->IsQuickBoost() || (MoveComp->MovementMode != MOVE_Walking && MoveComp->MovementMode != MOVE_Falling)) return;
-	if (WorldDirection.ContainsNaN() || WorldDirection.IsNearlyZero() || !MoveComp->UpdatedComponent) return;
+	if (WorldDirection.ContainsNaN() || WorldDirection.IsNearlyZero() || !IsValid(MoveComp->UpdatedComponent)) return;
 
 
 	bIsAssaultBoosting = true;
@@ -114,12 +123,16 @@ void ARobotCharacterBase::DoAssaultBoost(const FVector& WorldDirection)
 void ARobotCharacterBase::DoQuickBoost(const FVector& WorldDirection)
 {
 	URobotMovementComponent* MoveComp = Cast<URobotMovementComponent>(GetMovementComponent());
-	if (MoveComp == nullptr) return;
+	if (!IsValid(MoveComp)) return;
 
 	if (IsDead() || MoveComp->IsQuickBoost()) return;
+
 	const bool bFromAssault = IsAssaultBoosting() && MoveComp->MovementMode == MOVE_Flying;
+
 	if (!bFromAssault && MoveComp->MovementMode != MOVE_Walking && MoveComp->MovementMode != MOVE_Falling) return;
+
 	if (WorldDirection.ContainsNaN()) return;
+
 	const FVector Direction = WorldDirection.GetSafeNormal2D();
 	if (Direction.IsNearlyZero()) return;
 
@@ -129,7 +142,9 @@ void ARobotCharacterBase::DoQuickBoost(const FVector& WorldDirection)
 	}
 
 	StopAssaultBoost();
+
 	UE_LOG(LogRobotActionProject, Display, TEXT("<QuickBoostAction!!!>: %s"), *WorldDirection.ToString());
+
 	MoveComp->StartQuickBoost(Direction);
 
 }
@@ -139,7 +154,8 @@ void ARobotCharacterBase::StopAssaultBoost()
 	if (!bIsAssaultBoosting) return;
 	
 	bIsAssaultBoosting = false;
-	if (URobotMovementComponent* MoveComp = Cast<URobotMovementComponent>(GetCharacterMovement())) {
+	URobotMovementComponent* MoveComp = Cast<URobotMovementComponent>(GetCharacterMovement());
+	if (IsValid(MoveComp)) {
 		MoveComp->StopAssaultBoostMovement();
 	}
 
@@ -153,7 +169,8 @@ void ARobotCharacterBase::StopAssaultBoost()
 void ARobotCharacterBase::BeginPlay()
 {
 	Super::BeginPlay();
-	if (URobotMovementComponent* MoveComp = Cast<URobotMovementComponent>(GetCharacterMovement())) {
+	URobotMovementComponent* MoveComp = Cast<URobotMovementComponent>(GetCharacterMovement());
+	if (IsValid(MoveComp)) {
 		PrimaryActorTick.RemovePrerequisite(MoveComp, MoveComp->PrimaryComponentTick);
 		MoveComp->AddTickPrerequisiteActor(this);
 	}
@@ -191,7 +208,7 @@ void ARobotCharacterBase::Tick(float DeltaTime)
 	if (RecoveryTime <= 0.0f) return;
 
 	const UCharacterMovementComponent* Movement = GetCharacterMovement();
-	if (Movement == nullptr) return;
+	if (!IsValid(Movement)) return;
 
 	float RecoveryRate = 0.0f;
 	if (Movement->IsMovingOnGround()) {
