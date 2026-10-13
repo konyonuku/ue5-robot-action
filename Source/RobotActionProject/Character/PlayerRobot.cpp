@@ -17,6 +17,7 @@
 #include "Character/LockOnComponent.h"
 
 #include "Combat/ProjectileSubsystem.h"
+#include "Combat/RifleWeapon.h"
 
 
 APlayerRobot::APlayerRobot()
@@ -58,6 +59,7 @@ void APlayerRobot::Restart()
 void APlayerRobot::UnPossessed()
 {
 	RemoveDebugHUD();
+	StopWeaponFire();
 
 	Super::UnPossessed();
 }
@@ -85,6 +87,7 @@ void APlayerRobot::Tick(float DeltaTime)
 	if (IsDead() || !IsValid(GetController())) return;
 
 	UpdateLockOnCamera(DeltaTime);
+	UpdateWeaponAim();
 
 	if (IsAssaultBoosting()) {
 		URobotMovementComponent* MoveComp = Cast<URobotMovementComponent>(GetCharacterMovement());
@@ -101,14 +104,27 @@ void APlayerRobot::BeginPlay()
 
 	bStatsReady = true; // HUD can read robot's stats
 	TryCreateDebugHUD();
+
+	CreateWeapon();
+	OnDied.AddUniqueDynamic(this, &APlayerRobot::StopWeaponFire);
 }
 
 void APlayerRobot::EndPlay(const EEndPlayReason::Type EndPlayReason)
 {
 	bStatsReady = false;
 	RemoveDebugHUD();
+	
+	StopWeaponFire();
+	OnDied.RemoveDynamic(this, &APlayerRobot::StopWeaponFire);
+
+	if (IsValid(LeftHandRifle))
+	{
+		LeftHandRifle->Destroy();
+		LeftHandRifle = nullptr;
+	}
 
 	Super::EndPlay(EndPlayReason);
+
 }
 
 
@@ -202,6 +218,8 @@ void APlayerRobot::SetupPlayerInputComponent(UInputComponent* PlayerInputCompone
 	//Bind LH Fire
 	if (IsValid(LeftHandWeaponFireAction)) {
 		EnhancedInput->BindAction(LeftHandWeaponFireAction, ETriggerEvent::Started, this, &APlayerRobot::LeftHandWeaponFireRequested);
+		EnhancedInput->BindAction(LeftHandWeaponFireAction, ETriggerEvent::Completed, this, &APlayerRobot::LeftHandWeaponFireEnded);
+		EnhancedInput->BindAction(LeftHandWeaponFireAction, ETriggerEvent::Canceled, this, &APlayerRobot::LeftHandWeaponFireEnded);
 	}
 	else {
 		UE_LOG(LogRobotActionProject, Warning, TEXT("LeftHandWeaponFireAction is not assigned or is invalid."));
@@ -383,23 +401,11 @@ void APlayerRobot::LeftHandWeaponFireRequested()
 {
 	UE_LOG(LogRobotActionProject, Display, TEXT("LH Fire!"));
 
-	if (IsDead() || !IsValid(FollowCamera)) return;
+	if (IsDead() || !IsValid(GetController())) return;
+	if (!IsValid(LeftHandRifle) || !IsValid(FollowCamera)) return;
 
-	UWorld* World = GetWorld();
-	if (!IsValid(World)) return;
-
-	UProjectileSubsystem* Projectiles = World->GetSubsystem<UProjectileSubsystem>();
-	if (!IsValid(Projectiles)) return;
-
-	FProjectileSpawnParams Params;
-	Params.StartLocation = GetActorLocation() + FVector(0.0, 0.0, 50.0);
-	Params.Direction = FollowCamera->GetForwardVector();
-	Params.Owner = this;
-
-	if (!Projectiles->TrySpawnProjectile(Params))
-	{
-		UE_LOG(LogRobotActionProject, Warning, TEXT("Projectile spawn failed."));
-	}
+	UpdateWeaponAim();
+	LeftHandRifle->StartFire();
 
 }
 
@@ -407,6 +413,66 @@ void APlayerRobot::RightHandWeaponFireRequested()
 {
 	UE_LOG(LogRobotActionProject, Display, TEXT("RH Fire!"));
 
+}
+
+void APlayerRobot::CreateWeapon()
+{
+	UWorld* World = GetWorld();
+	USkeletalMeshComponent* CharacterMesh = GetMesh();
+	const FName AttachSocket = TEXT("Weapon_L");
+
+	if (!IsValid(World) || !IsValid(CharacterMesh)) return;
+	if (!IsValid(WeaponClass.Get()) || IsValid(LeftHandRifle)) return;
+	if (!CharacterMesh->DoesSocketExist(AttachSocket)) return;
+
+	FActorSpawnParameters SpawnParams;
+	SpawnParams.Owner = this;
+
+	LeftHandRifle = World->SpawnActor<ARifleWeapon>(
+		WeaponClass.Get(),
+		GetActorLocation(),
+		GetActorRotation(),
+		SpawnParams);
+
+	if (!IsValid(LeftHandRifle)) return;
+
+	LeftHandRifle->AttachToComponent(
+		CharacterMesh,
+		FAttachmentTransformRules::SnapToTargetNotIncludingScale,
+		AttachSocket);
+
+	LeftHandRifle->AddTickPrerequisiteActor(this);
+
+}
+
+void APlayerRobot::UpdateWeaponAim()
+{
+	if (!IsValid(LeftHandRifle) || !IsValid(FollowCamera)) return;
+
+	FVector Direction = FollowCamera->GetForwardVector();
+
+	ARobotCharacterBase* Target = IsValid(LockOnComponent)
+		? LockOnComponent->GetCurrentTarget()
+		: nullptr;
+
+	if (Target != nullptr)
+	{
+		Direction = Target->GetActorLocation()
+			- LeftHandRifle->GetMuzzleLocation();
+	}
+
+	LeftHandRifle->SetAimDirection(Direction);
+
+}
+
+void APlayerRobot::LeftHandWeaponFireEnded()
+{
+	if (IsValid(LeftHandRifle)) LeftHandRifle->StopFire();
+}
+
+void APlayerRobot::StopWeaponFire() // for all weapon
+{
+	if (IsValid(LeftHandRifle)) LeftHandRifle->StopFire();
 }
 
 FVector APlayerRobot::GetQuickBoostWorldDirection() const

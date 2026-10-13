@@ -5,6 +5,9 @@
 #include "CollisionQueryParams.h"
 #include "CollisionShape.h"
 #include "DrawDebugHelpers.h"
+#include "Combat/ProjectileRenderer.h"
+#include "NiagaraFunctionLibrary.h"
+#include "NiagaraSystem.h"
 
 
 void UProjectileSubsystem::Initialize(FSubsystemCollectionBase& Collection)
@@ -25,6 +28,14 @@ void UProjectileSubsystem::Initialize(FSubsystemCollectionBase& Collection)
 
 void UProjectileSubsystem::Deinitialize()
 {
+	AProjectileRenderer* CurrentRenderer = Renderer.Get();
+	if (IsValid(CurrentRenderer)) {
+		for (const int32 PoolIndex : ActiveIndices) {
+			CurrentRenderer->HideProjectile(PoolIndex);
+		}
+	}
+
+	Renderer.Reset();
 	ActiveIndices.Empty();
 	FreeIndices.Empty();
 	ProjectilePool.Empty();
@@ -43,8 +54,24 @@ void UProjectileSubsystem::Tick(float DeltaTime)
 		FHitResult Hit;
 		if (!UpdateProjectile(PoolIndex, DeltaTime, Hit))
 		{
+			UNiagaraSystem* ImpactSystem = ProjectilePool[PoolIndex].ImpactSystem.Get();
+			const bool bImpact = Hit.bBlockingHit || Hit.bStartPenetrating;
+
 			ReleaseProjectile(ActiveListIndex);
+
+			if (bImpact) PlayImpactEffect(ImpactSystem, Hit);
+
 		}
+		else
+		{
+			AProjectileRenderer* CurrentRenderer = Renderer.Get();
+			if (IsValid(CurrentRenderer))
+			{
+				const FProjectileState& State = ProjectilePool[PoolIndex];
+				CurrentRenderer->ShowProjectile(PoolIndex, State.Position, State.Velocity.GetSafeNormal(), State.VisualScale);
+			}
+		}
+
 	}
 }
 
@@ -81,12 +108,60 @@ bool UProjectileSubsystem::TrySpawnProjectile(const FProjectileSpawnParams& Para
 	State.RemainingTravelDistance = Params.MaxTravelDistance;
 	State.CollisionRadius = Params.CollisionRadius;
 	State.Damage = Params.Damage;
+	State.VisualScale = Params.VisualScale;
 	State.Owner = Params.Owner;
 	State.IgnoredActors = Params.IgnoredActors;
+	State.ImpactSystem = Params.ImpactSystem;
 
 	FreeIndices.Pop(EAllowShrinking::No);
 	ActiveIndices.Add(PoolIndex);
+
+	AProjectileRenderer* CurrentRenderer = Renderer.Get();
+	if (IsValid(CurrentRenderer)) {
+		CurrentRenderer->ShowProjectile(PoolIndex, State.Position, Direction, State.VisualScale);
+	}
 	return true;
+
+}
+
+bool UProjectileSubsystem::RegisterRenderer(AProjectileRenderer* InRenderer)
+{
+	if (!IsValid(InRenderer) || InRenderer->GetWorld() != GetWorld()) return false;
+
+	AProjectileRenderer* CurrentRenderer = Renderer.Get();
+	if (IsValid(CurrentRenderer)) return CurrentRenderer == InRenderer;
+
+	if (ProjectilePool.IsEmpty()) return false;
+
+	if (!InRenderer->InitializeInstances(ProjectilePool.Num())) return false;
+
+	Renderer = InRenderer;
+	for (const int32 PoolIndex : ActiveIndices)
+	{
+		const FProjectileState& State = ProjectilePool[PoolIndex];
+		InRenderer->ShowProjectile(PoolIndex, State.Position, State.Velocity.GetSafeNormal(), State.VisualScale);
+	}
+
+	return true;
+
+}
+
+void UProjectileSubsystem::UnregisterRenderer(AProjectileRenderer* InRenderer)
+{
+	if (!Renderer.IsValid()) {
+		Renderer.Reset();
+		return;
+	}
+
+	AProjectileRenderer* CurrentRenderer = Renderer.Get();
+	if (CurrentRenderer != InRenderer) return;
+
+	if (IsValid(CurrentRenderer)) {
+		for (const int32 PoolIndex : ActiveIndices) {
+			CurrentRenderer->HideProjectile(PoolIndex);
+		}
+	}
+	Renderer.Reset();
 
 }
 
@@ -97,8 +172,28 @@ void UProjectileSubsystem::ReleaseProjectile(int32 ActiveListIndex)
 	const int32 PoolIndex = ActiveIndices[ActiveListIndex];
 	if (!ProjectilePool.IsValidIndex(PoolIndex)) return;
 
+	AProjectileRenderer* CurrentRenderer = Renderer.Get();
+	if (IsValid(CurrentRenderer)) {
+		CurrentRenderer->HideProjectile(PoolIndex);
+	}
 	ActiveIndices.RemoveAtSwap(ActiveListIndex, 1, EAllowShrinking::No);
 	FreeIndices.Add(PoolIndex);
+
+}
+
+void UProjectileSubsystem::PlayImpactEffect(UNiagaraSystem* ImpactSystem, const FHitResult& Hit)
+{
+	UWorld* World = GetWorld();
+	if (!IsValid(World) || !IsValid(ImpactSystem)) return;
+
+	if (!Hit.bBlockingHit && !Hit.bStartPenetrating) return;
+
+	if (Hit.ImpactPoint.ContainsNaN() || Hit.ImpactNormal.ContainsNaN()) return;
+
+	const FVector Normal = Hit.ImpactNormal.GetSafeNormal();
+	if (Normal.IsNearlyZero()) return;
+
+	UNiagaraFunctionLibrary::SpawnSystemAtLocation(World, ImpactSystem, Hit.ImpactPoint, Normal.Rotation(), FVector::OneVector, true, true, ENCPoolMethod::None);
 
 }
 
@@ -146,12 +241,9 @@ bool UProjectileSubsystem::UpdateProjectile(int32 PoolIndex, float DeltaTime, FH
 	State.RemainingLifetime = FMath::Max(0.0f, State.RemainingLifetime - static_cast<float>(MoveTime * TravelFraction));
 	State.RemainingTravelDistance = FMath::Max(0.0f, State.RemainingTravelDistance - static_cast<float>(MoveDistance * TravelFraction));
 
-	/////
-	if (bDrawDebug)
-	{
+	if (bDrawDebug) {
 		DrawDebugLine(World, Start, State.Position, bCollided ? FColor::Red : FColor::Green, false, 0.1f, 0, 1.0f);
 	}
-	/////
 
 	if (bCollided) return false;
 	if (MoveTime >= Lifetime) State.RemainingLifetime = 0.0f;

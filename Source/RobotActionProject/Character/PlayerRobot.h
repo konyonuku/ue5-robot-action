@@ -16,6 +16,7 @@ class UInputAction;
 class URobotDebugWidget;
 struct FInputActionValue;
 class ULockOnComponent;
+class ARifleWeapon;
 
 
 UCLASS()
@@ -84,6 +85,10 @@ protected:
     UPROPERTY(EditDefaultsOnly, Category = "Robot|Input")
     TObjectPtr<UInputAction> RightShoulderWeaponFireAction;
     
+
+    UPROPERTY(EditDefaultsOnly, Category = "Robot|Weapon")
+    TSubclassOf<ARifleWeapon> WeaponClass;
+
     
     UPROPERTY(EditDefaultsOnly, Category = "Robot|UI")
     TSubclassOf<URobotDebugWidget> DebugWidgetClassToCreate;
@@ -121,9 +126,20 @@ private:
 
 
     void LeftHandWeaponFireRequested();
+    void LeftHandWeaponFireEnded();
     void RightHandWeaponFireRequested();
     //void LeftShoulderWeaponFireRequested();
     //void RightShoulderWeaponFireRequested();
+
+
+    UPROPERTY(Transient)
+    TObjectPtr<ARifleWeapon> LeftHandRifle;
+
+    void CreateWeapon();
+    void UpdateWeaponAim();
+
+    UFUNCTION()
+    void StopWeaponFire();
 
 
 };

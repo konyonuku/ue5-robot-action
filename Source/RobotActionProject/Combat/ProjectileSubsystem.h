@@ -8,6 +8,8 @@
 #include "ProjectileSubsystem.generated.h"
 
 struct FHitResult;
+class AProjectileRenderer;
+class UNiagaraSystem;
 
 
 /**
@@ -27,6 +29,12 @@ public:
 	// invalid spawn data or the pool is full -> return false
 	bool TrySpawnProjectile(const FProjectileSpawnParams& Params);
 
+
+	// link to ProjectileRenderer
+	bool RegisterRenderer(AProjectileRenderer* InRenderer);
+	void UnregisterRenderer(AProjectileRenderer* InRenderer);
+
+
 private:
 	bool UpdateProjectile(int32 PoolIndex, float DeltaTime, FHitResult& OutHit);
 	void ReleaseProjectile(int32 ActiveListIndex);
@@ -37,7 +45,12 @@ private:
 
 	int32 PoolCapacity = 256;
 	bool bDrawDebug = true;
-	
+
+	TWeakObjectPtr<AProjectileRenderer> Renderer;
+
+
+	void PlayImpactEffect(UNiagaraSystem* ImpactSystem, const FHitResult& Hit);
+
 };
 
 /*

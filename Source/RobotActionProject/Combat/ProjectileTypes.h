@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 
 class AActor;
+class UNiagaraSystem;
 
 
 struct FProjectileSpawnParams
@@ -14,9 +15,12 @@ struct FProjectileSpawnParams
 	float MaxTravelDistance = 20000.0f;
 	float CollisionRadius = 2.0f;
 	float Damage = 10.0f;
+	FVector VisualScale = FVector::OneVector;
 
 	TWeakObjectPtr<AActor> Owner;
 	TArray<TWeakObjectPtr<AActor>> IgnoredActors;
+
+	TWeakObjectPtr<UNiagaraSystem> ImpactSystem;
 };
 
 
@@ -28,7 +32,10 @@ struct FProjectileState
 	float RemainingTravelDistance = 0.0f;
 	float CollisionRadius = 0.0f;
 	float Damage = 0.0f;
+	FVector VisualScale = FVector::OneVector;
 
 	TWeakObjectPtr<AActor> Owner;
 	TArray<TWeakObjectPtr<AActor>> IgnoredActors;
+
+	TWeakObjectPtr<UNiagaraSystem> ImpactSystem;
 };
